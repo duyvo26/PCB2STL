@@ -1,4 +1,4 @@
-# 3D PCB Generator (Tạo 3D PCB PRO)
+# PCB2STL Pro: Advanced 2D to 3D PCB Generator
 
 [English](#english) | [Tiếng Việt](#tiếng-việt)
 
@@ -25,7 +25,7 @@ Ensure you have Python 3.8 or newer installed. All required dependencies are lis
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/duyvo26/pcb_3d_main.git
    cd pcb_3d_main
    ```
 
@@ -77,7 +77,7 @@ Công cụ bằng Python dùng để chuyển đổi bản thiết kế PCB 2D t
 
 1. Clone dự án về máy:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/duyvo26/pcb_3d_main.git
    cd pcb_3d_main
    ```
 
