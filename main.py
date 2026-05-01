@@ -85,8 +85,8 @@ def create_mesh(heightmap, hole_mask, pitch_x, pitch_y, base_thickness):
 
 
 # ================= PROCESS =================
-def process(png_file, svg_file, base_thickness, trace_height,
-            output_path=None, log_cb=None, prog_cb=None):
+def process(png_file, svg_file, base_thickness, trace_height, skip_holes=False,
+            custom_hole_mask=None, output_path=None, log_cb=None, prog_cb=None):
 
     def log(msg):
         if log_cb:
@@ -126,16 +126,20 @@ def process(png_file, svg_file, base_thickness, trace_height,
     _, th = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)
     contours, _ = cv2.findContours(th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
-    hole_mask = np.zeros_like(img, dtype=bool)
+    if custom_hole_mask is not None:
+        hole_mask = custom_hole_mask
+    else:
+        hole_mask = np.zeros_like(img, dtype=bool)
 
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if 2 < area < 1200:
-            peri = cv2.arcLength(cnt, True)
-            if peri > 0:
-                circ = 4 * np.pi * area / (peri * peri)
-                if circ > 0.6:
-                    cv2.drawContours(hole_mask.view(np.uint8), [cnt], -1, 1, -1)
+        if not skip_holes:
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if 2 < area < 1200:
+                    peri = cv2.arcLength(cnt, True)
+                    if peri > 0:
+                        circ = 4 * np.pi * area / (peri * peri)
+                        if circ > 0.6:
+                            cv2.drawContours(hole_mask.view(np.uint8), [cnt], -1, 1, -1)
 
     prog(0.4)
 
@@ -165,11 +169,12 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Tạo 3D PCB PRO")
-        self.geometry("950x560")
+        self.geometry("1100x700")
 
         self.png_path = None
         self.svg_path = None
         self.output_path = None
+        self.custom_hole_mask = None
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -205,11 +210,18 @@ class App(ctk.CTk):
         self.cfg = ctk.CTkFrame(self.main)
         self.cfg.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
 
-        self.base_input = ctk.CTkEntry(self.cfg, placeholder_text="Độ dày đế (1.6)")
+        self.base_input = ctk.CTkEntry(self.cfg, placeholder_text="Độ dày đế (1.2)")
         self.base_input.pack(side="left", padx=5, pady=5)
 
         self.trace_input = ctk.CTkEntry(self.cfg, placeholder_text="Độ cao mạch (0.6)")
         self.trace_input.pack(side="left", padx=5, pady=5)
+
+        self.skip_holes_var = ctk.BooleanVar(value=False)
+        self.skip_holes_cb = ctk.CTkCheckBox(self.cfg, text="Bỏ đục lỗ", variable=self.skip_holes_var)
+        self.skip_holes_cb.pack(side="left", padx=10, pady=5)
+
+        self.edit_holes_btn = ctk.CTkButton(self.cfg, text="Chỉnh sửa lỗ", command=self.edit_holes)
+        self.edit_holes_btn.pack(side="left", padx=10, pady=5)
 
         # LOG
         self.logbox = ctk.CTkTextbox(self.main)
@@ -225,6 +237,7 @@ class App(ctk.CTk):
 
     def load_png(self):
         self.png_path = filedialog.askopenfilename(filetypes=[("PNG", "*.png")])
+        self.custom_hole_mask = None
         self.update_info()
 
     def load_svg(self):
@@ -243,6 +256,99 @@ class App(ctk.CTk):
             f"LƯU TẠI: {self.output_path if self.output_path else 'Tự động (cùng thư mục SVG)'}"
         )
 
+    def edit_holes(self):
+        if not self.png_path or not os.path.exists(self.png_path):
+            self.log("LỖI: Chưa chọn PNG")
+            return
+
+        img = cv2.imread(self.png_path, cv2.IMREAD_GRAYSCALE)
+        
+        if self.custom_hole_mask is None:
+            _, th = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)
+            contours, _ = cv2.findContours(th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+            self.custom_hole_mask = np.zeros_like(img, dtype=bool)
+            if not self.skip_holes_var.get():
+                for cnt in contours:
+                    area = cv2.contourArea(cnt)
+                    if 2 < area < 1200:
+                        peri = cv2.arcLength(cnt, True)
+                        if peri > 0:
+                            circ = 4 * np.pi * area / (peri * peri)
+                            if circ > 0.6:
+                                cv2.drawContours(self.custom_hole_mask.view(np.uint8), [cnt], -1, 1, -1)
+
+        display_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        
+        drawing = False
+        brush_size = 15
+        win_name = "Chinh sua lo (Trai: Xoa, Phai: Them, Z/Ctrl+Z: Hoan tac, ESC: Luu)"
+
+        history = []
+        mouse_x, mouse_y = -1, -1
+
+        def save_state():
+            history.append(self.custom_hole_mask.copy())
+            if len(history) > 20:
+                history.pop(0)
+
+        def undo():
+            if history:
+                self.custom_hole_mask = history.pop()
+                update_display()
+
+        def update_display():
+            disp = display_img.copy()
+            disp[self.custom_hole_mask] = [0, 0, 255] # Lỗ màu đỏ
+            if mouse_x >= 0 and mouse_y >= 0:
+                cv2.circle(disp, (mouse_x, mouse_y), brush_size, (255, 255, 0), 2) # Viền màu vàng
+            cv2.imshow(win_name, disp)
+
+        def mouse_event(event, x, y, flags, param):
+            nonlocal drawing, mouse_x, mouse_y
+            mouse_x, mouse_y = x, y
+            if event == cv2.EVENT_LBUTTONDOWN or event == cv2.EVENT_RBUTTONDOWN:
+                save_state()
+                drawing = True
+                if flags & cv2.EVENT_FLAG_LBUTTON:
+                    cv2.circle(self.custom_hole_mask.view(np.uint8), (x, y), brush_size, 0, -1)
+                elif flags & cv2.EVENT_FLAG_RBUTTON:
+                    cv2.circle(self.custom_hole_mask.view(np.uint8), (x, y), brush_size, 1, -1)
+                update_display()
+            elif event == cv2.EVENT_MOUSEMOVE:
+                if drawing:
+                    if flags & cv2.EVENT_FLAG_LBUTTON:
+                        cv2.circle(self.custom_hole_mask.view(np.uint8), (x, y), brush_size, 0, -1)
+                    elif flags & cv2.EVENT_FLAG_RBUTTON:
+                        cv2.circle(self.custom_hole_mask.view(np.uint8), (x, y), brush_size, 1, -1)
+                update_display()
+            elif event == cv2.EVENT_LBUTTONUP or event == cv2.EVENT_RBUTTONUP:
+                drawing = False
+                update_display()
+
+        cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(win_name, 1200, 800)
+        cv2.setMouseCallback(win_name, mouse_event)
+        
+        update_display()
+        while True:
+            k = cv2.waitKey(50) & 0xFF
+            if k == 27: # ESC
+                break
+            if cv2.getWindowProperty(win_name, cv2.WND_PROP_VISIBLE) < 1:
+                break
+            if k == 26 or k == ord('z') or k == ord('Z'):
+                undo()
+            elif k == ord('+') or k == ord('='):
+                brush_size += 2
+                update_display()
+            elif k == ord('-'):
+                brush_size = max(1, brush_size - 2)
+                update_display()
+
+        cv2.destroyAllWindows()
+        self.log("Đã lưu các chỉnh sửa lỗ khoan.")
+
     def run_thread(self):
         threading.Thread(target=self.run).start()
 
@@ -251,14 +357,17 @@ class App(ctk.CTk):
             self.log("==== BẮT ĐẦU ====")
             self.set_progress(0)
 
-            base = float(self.base_input.get() or 1.6)
+            base = float(self.base_input.get() or 1.2)
             trace = float(self.trace_input.get() or 0.6)
+            skip_holes = self.skip_holes_var.get()
 
             out = process(
                 self.png_path,
                 self.svg_path,
                 base,
                 trace,
+                skip_holes=skip_holes,
+                custom_hole_mask=self.custom_hole_mask,
                 output_path=self.output_path,
                 log_cb=self.log,
                 prog_cb=self.set_progress
