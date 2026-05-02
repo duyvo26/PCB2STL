@@ -34,6 +34,13 @@ Ensure you have Python 3.8 or newer installed. All required dependencies are lis
    pip install -r requirements.txt
    ```
 
+### Preparation (EasyEDA)
+
+To use this tool, you can design your PCB using [EasyEDA](https://easyeda.com/):
+1. Design your PCB layout in EasyEDA.
+2. Export the layout as a `.png` file (for trace height mapping).
+3. Export the layout as a `.svg` file (for physical dimensions).
+
 ### Usage
 
 1. Start the application:
@@ -53,6 +60,17 @@ Ensure you have Python 3.8 or newer installed. All required dependencies are lis
      - **+** / **-**: Increase or decrease brush size
      - **ESC**: Save and close the editor
    - Click **Tạo File STL** to generate and save the 3D model.
+
+### Demo
+
+**Application Demo:**
+
+![App Demo](docs/001.jpg)
+
+**3D Printed PCBs:**
+
+![3D Printed PCB 1](docs/002.jpg)
+![3D Printed PCB 2](docs/003.jpg)
 
 ---
 
@@ -86,6 +104,13 @@ Công cụ bằng Python dùng để chuyển đổi bản thiết kế PCB 2D t
    pip install -r requirements.txt
    ```
 
+### Chuẩn bị (EasyEDA)
+
+Để sử dụng công cụ này, bạn có thể thiết kế mạch PCB bằng [EasyEDA](https://easyeda.com/):
+1. Thiết kế mạch của bạn trên EasyEDA.
+2. Xuất (Export) bản thiết kế dưới dạng ảnh `.png` (để làm bản đồ độ cao mạch).
+3. Xuất (Export) bản thiết kế dưới dạng file `.svg` (để lấy thông tin kích thước vật lý).
+
 ### Hướng dẫn sử dụng
 
 1. Chạy ứng dụng:
@@ -105,3 +130,14 @@ Công cụ bằng Python dùng để chuyển đổi bản thiết kế PCB 2D t
      - **+** / **-**: Tăng hoặc giảm kích thước cọ vẽ
      - **ESC**: Lưu và đóng trình chỉnh sửa
    - Bấm **Tạo File STL** để tiến hành tạo và lưu mô hình 3D.
+
+### Demo
+
+**Demo Ứng dụng:**
+
+![Demo Ứng dụng](docs/001.jpg)
+
+**Mạch đã in 3D:**
+
+![Mạch đã in 3D 1](docs/002.jpg)
+![Mạch đã in 3D 2](docs/003.jpg)
