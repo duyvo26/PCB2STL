@@ -85,7 +85,7 @@ def create_mesh(heightmap, hole_mask, pitch_x, pitch_y, base_thickness):
 
 
 # ================= PROCESS =================
-def process(png_file, svg_file, base_thickness, trace_height, skip_holes=False,
+def process(png_file, svg_file, base_thickness, trace_height, mode="Lom", skip_holes=False,
             custom_hole_mask=None, output_path=None, log_cb=None, prog_cb=None):
 
     def log(msg):
@@ -97,10 +97,10 @@ def process(png_file, svg_file, base_thickness, trace_height, skip_holes=False,
             prog_cb(v)
 
     if not os.path.exists(png_file):
-        raise FileNotFoundError("PNG không tồn tại")
+        raise FileNotFoundError("PNG khong ton tai")
 
     if not os.path.exists(svg_file):
-        raise FileNotFoundError("SVG không tồn tại")
+        raise FileNotFoundError("SVG khong ton tai")
 
     # ===== OUTPUT =====
     if not output_path:
@@ -111,18 +111,18 @@ def process(png_file, svg_file, base_thickness, trace_height, skip_holes=False,
     log(f"Output: {output_path}")
 
     # ===== PROCESS =====
-    log("Đọc PNG...")
+    log("Doc PNG...")
     img = cv2.imread(png_file, cv2.IMREAD_GRAYSCALE)
     rows, cols = img.shape
     prog(0.1)
 
-    log("Đọc SVG...")
+    log("Doc SVG...")
     svg_w, svg_h = parse_svg_size(svg_file)
     pitch_x = svg_w / cols
     pitch_y = svg_h / rows
     prog(0.2)
 
-    log("Phát hiện lỗ khoan...")
+    log("Phat hien lo khoan...")
     _, th = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)
     contours, _ = cv2.findContours(th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -143,18 +143,26 @@ def process(png_file, svg_file, base_thickness, trace_height, skip_holes=False,
 
     prog(0.4)
 
-    log("Tạo bản đồ độ cao...")
-    heightmap = (img.astype(float) / 255.0 - 1.0) * trace_height
+    log(f"Tao ban do do cao ({mode})...")
+    img_float = img.astype(float) / 255.0
+    
+    if mode == "Noi":
+        # Trace (den=0) -> cao hon, Nen (trang=1) -> thap hon
+        heightmap = (1.0 - img_float) * trace_height
+    else:
+        # Trace (den=0) -> thap hon (mac dinh)
+        heightmap = (img_float - 1.0) * trace_height
+        
     prog(0.6)
 
-    log("Tạo mô hình lưới (Mesh)...")
+    log("Tao mo hinh luoi (Mesh)...")
     mesh = create_mesh(heightmap, hole_mask, pitch_x, pitch_y, base_thickness)
     prog(0.8)
 
     mesh.export(output_path)
 
     prog(1.0)
-    log("HOÀN TẤT ✔")
+    log("HOAN TAT ✔")
 
     return output_path
 
@@ -168,8 +176,8 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Tạo 3D PCB PRO")
-        self.geometry("1100x700")
+        self.title("Tao 3D PCB PRO")
+        self.geometry("1100x750")
 
         self.png_path = None
         self.svg_path = None
@@ -183,13 +191,13 @@ class App(ctk.CTk):
         self.sidebar = ctk.CTkFrame(self, width=220)
         self.sidebar.grid(row=0, column=0, sticky="nswe")
 
-        ctk.CTkLabel(self.sidebar, text="CÔNG CỤ PCB", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=20)
+        ctk.CTkLabel(self.sidebar, text="CONG CU PCB", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=20)
 
-        ctk.CTkButton(self.sidebar, text="Tải PNG", command=self.load_png).pack(pady=10, padx=10)
-        ctk.CTkButton(self.sidebar, text="Tải SVG", command=self.load_svg).pack(pady=10, padx=10)
-        ctk.CTkButton(self.sidebar, text="Chọn Nơi Lưu (tùy chọn)", command=self.choose_output).pack(pady=10, padx=10)
+        ctk.CTkButton(self.sidebar, text="Tai PNG", command=self.load_png).pack(pady=10, padx=10)
+        ctk.CTkButton(self.sidebar, text="Tai SVG", command=self.load_svg).pack(pady=10, padx=10)
+        ctk.CTkButton(self.sidebar, text="Chon Noi Luu (tuy chon)", command=self.choose_output).pack(pady=10, padx=10)
 
-        self.run_btn = ctk.CTkButton(self.sidebar, text="Tạo File STL", command=self.run_thread)
+        self.run_btn = ctk.CTkButton(self.sidebar, text="Tao File STL", command=self.run_thread, fg_color="#2ecc71", hover_color="#27ae60")
         self.run_btn.pack(pady=20, padx=10)
 
         self.progress = ctk.CTkProgressBar(self.sidebar)
@@ -203,25 +211,40 @@ class App(ctk.CTk):
         self.main.grid_columnconfigure(0, weight=1)
         self.main.grid_rowconfigure(3, weight=1)
 
-        self.info = ctk.CTkLabel(self.main, text="Chưa chọn file", anchor="w", justify="left")
+        self.info = ctk.CTkLabel(self.main, text="Chua chon file", anchor="w", justify="left")
         self.info.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
 
         # CONFIG
         self.cfg = ctk.CTkFrame(self.main)
         self.cfg.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
 
-        self.base_input = ctk.CTkEntry(self.cfg, placeholder_text="Độ dày đế (1.2)")
-        self.base_input.pack(side="left", padx=5, pady=5)
+        # Hang 1 cua Config
+        row1 = ctk.CTkFrame(self.cfg, fg_color="transparent")
+        row1.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(row1, text="Do day de (mm):").pack(side="left", padx=5)
+        self.base_input = ctk.CTkEntry(row1, placeholder_text="1.2", width=100)
+        self.base_input.pack(side="left", padx=5)
 
-        self.trace_input = ctk.CTkEntry(self.cfg, placeholder_text="Độ cao mạch (0.6)")
-        self.trace_input.pack(side="left", padx=5, pady=5)
+        ctk.CTkLabel(row1, text="Cao mach (mm):").pack(side="left", padx=15)
+        self.trace_input = ctk.CTkEntry(row1, placeholder_text="0.6", width=100)
+        self.trace_input.pack(side="left", padx=5)
+
+        # Hang 2 cua Config: Kieu mach (Noi/Lom)
+        row2 = ctk.CTkFrame(self.cfg, fg_color="transparent")
+        row2.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(row2, text="Kieu duong mach:").pack(side="left", padx=5)
+        self.mode_var = ctk.StringVar(value="Lom")
+        self.mode_switch = ctk.CTkSegmentedButton(row2, values=["Lom", "Noi"], variable=self.mode_var)
+        self.mode_switch.pack(side="left", padx=10)
 
         self.skip_holes_var = ctk.BooleanVar(value=False)
-        self.skip_holes_cb = ctk.CTkCheckBox(self.cfg, text="Bỏ đục lỗ", variable=self.skip_holes_var)
-        self.skip_holes_cb.pack(side="left", padx=10, pady=5)
+        self.skip_holes_cb = ctk.CTkCheckBox(row2, text="Bo duc lo", variable=self.skip_holes_var)
+        self.skip_holes_cb.pack(side="left", padx=20)
 
-        self.edit_holes_btn = ctk.CTkButton(self.cfg, text="Chỉnh sửa lỗ", command=self.edit_holes)
-        self.edit_holes_btn.pack(side="left", padx=10, pady=5)
+        self.edit_holes_btn = ctk.CTkButton(row2, text="Chinh sua lo", command=self.edit_holes, width=120)
+        self.edit_holes_btn.pack(side="left", padx=10)
 
         # LOG
         self.logbox = ctk.CTkTextbox(self.main)
@@ -253,12 +276,12 @@ class App(ctk.CTk):
         self.info.configure(text=
             f"PNG: {self.png_path}\n"
             f"SVG: {self.svg_path}\n"
-            f"LƯU TẠI: {self.output_path if self.output_path else 'Tự động (cùng thư mục SVG)'}"
+            f"LUU TAI: {self.output_path if self.output_path else 'Tu dong (cung thu muc SVG)'}"
         )
 
     def edit_holes(self):
         if not self.png_path or not os.path.exists(self.png_path):
-            self.log("LỖI: Chưa chọn PNG")
+            self.log("LOI: Chua chon PNG")
             return
 
         img = cv2.imread(self.png_path, cv2.IMREAD_GRAYSCALE)
@@ -299,9 +322,9 @@ class App(ctk.CTk):
 
         def update_display():
             disp = display_img.copy()
-            disp[self.custom_hole_mask] = [0, 0, 255] # Lỗ màu đỏ
+            disp[self.custom_hole_mask] = [0, 0, 255] # Lo mau do
             if mouse_x >= 0 and mouse_y >= 0:
-                cv2.circle(disp, (mouse_x, mouse_y), brush_size, (255, 255, 0), 2) # Viền màu vàng
+                cv2.circle(disp, (mouse_x, mouse_y), brush_size, (255, 255, 0), 2) # Vien mau vang
             cv2.imshow(win_name, disp)
 
         def mouse_event(event, x, y, flags, param):
@@ -347,18 +370,19 @@ class App(ctk.CTk):
                 update_display()
 
         cv2.destroyAllWindows()
-        self.log("Đã lưu các chỉnh sửa lỗ khoan.")
+        self.log("Da luu cac chinh sua lo khoan.")
 
     def run_thread(self):
         threading.Thread(target=self.run).start()
 
     def run(self):
         try:
-            self.log("==== BẮT ĐẦU ====")
+            self.log("==== BAT DAU ====")
             self.set_progress(0)
 
             base = float(self.base_input.get() or 1.2)
             trace = float(self.trace_input.get() or 0.6)
+            mode = self.mode_var.get()
             skip_holes = self.skip_holes_var.get()
 
             out = process(
@@ -366,6 +390,7 @@ class App(ctk.CTk):
                 self.svg_path,
                 base,
                 trace,
+                mode=mode,
                 skip_holes=skip_holes,
                 custom_hole_mask=self.custom_hole_mask,
                 output_path=self.output_path,
@@ -373,10 +398,10 @@ class App(ctk.CTk):
                 prog_cb=self.set_progress
             )
 
-            self.log(f"ĐÃ LƯU TẠI: {out}")
+            self.log(f"DA LUU TAI: {out}")
 
         except Exception as e:
-            self.log(f"LỖI: {e}")
+            self.log(f"LOI: {e}")
 
 
 # ================= RUN =================
