@@ -109,7 +109,7 @@ def create_mesh(heightmap, hole_mask, pitch_x, pitch_y, base_thickness):
 
 
 # ================= PROCESS =================
-def process(png_file, svg_file, base_thickness, trace_height, mode="Lom", smooth_val=0, skip_holes=False,
+def process(png_file, svg_file, base_thickness, trace_height, mode="Lom", smooth_val=0, sharpen_val=0, hole_size_ratio=0.6, noise_val=0, skip_holes=False,
             custom_hole_mask=None, output_path=None, log_cb=None, prog_cb=None, texts=None):
 
     def log(msg_key, **kwargs):
@@ -145,12 +145,36 @@ def process(png_file, svg_file, base_thickness, trace_height, mode="Lom", smooth
         ksize = int(smooth_val * 2 + 1)
         img = cv2.GaussianBlur(img, (ksize, ksize), 0)
 
+    if sharpen_val > 0:
+        log("log_sharpening")
+        # Contrast Enhancement (CLAHE)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        img = clahe.apply(img)
+        # Sharpening (Unsharp Mask)
+        sigma = sharpen_val * 0.5
+        blurred = cv2.GaussianBlur(img, (0, 0), sigma)
+        img = cv2.addWeighted(img, 1.5 + (sharpen_val * 0.2), blurred, -0.5 - (sharpen_val * 0.2), 0)
+
     log("log_threshold")
     _, img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
 
+    if noise_val > 0:
+        log("log_removing_noise")
+        # Invert to find black blobs (text/noise)
+        img_inv = cv2.bitwise_not(img)
+        cnts, _ = cv2.findContours(img_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in cnts:
+            if cv2.contourArea(c) < noise_val:
+                cv2.drawContours(img, [c], -1, 255, -1) # Fill with background (white)
+
+    log("log_separating")
+    # Morphological opening to separate close traces
+    sep_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    img = cv2.morphologyEx(img, cv2.MORPH_OPEN, sep_kernel)
+
     log("log_detecting_holes")
-    _, th = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)
-    contours, _ = cv2.findContours(th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    # Detect holes from processed image
+    contours, _ = cv2.findContours(img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     if custom_hole_mask is not None:
         hole_mask = custom_hole_mask
@@ -159,11 +183,19 @@ def process(png_file, svg_file, base_thickness, trace_height, mode="Lom", smooth
         if not skip_holes:
             for cnt in contours:
                 area = cv2.contourArea(cnt)
-                if 2 < area < 1200:
+                if 5 < area < 3000:
                     peri = cv2.arcLength(cnt, True)
                     if peri > 0:
                         circ = 4 * np.pi * area / (peri * peri)
-                        if circ > 0.6: cv2.drawContours(hole_mask.view(np.uint8), [cnt], -1, 1, -1)
+                        if circ > 0.4:
+                            # Use minEnclosingCircle for perfectly round holes
+                            (x, y), radius = cv2.minEnclosingCircle(cnt)
+                            center = (int(x), int(y))
+                            drill_r = int(radius * hole_size_ratio)
+                            if drill_r > 0:
+                                cv2.circle(hole_mask.view(np.uint8), center, drill_r, 1, -1)
+                                # Clear the pad area from the trace mask as requested (cut the connection)
+                                cv2.drawContours(img, [cnt], -1, 0, -1)
 
     prog(0.4)
     log("log_creating_heightmap", m=mode)
@@ -252,7 +284,7 @@ class App(ctk.CTk):
         row1.pack(fill="x", pady=10)
         self.lbl_base = ctk.CTkLabel(row1, text="Do day de (mm):", width=120, anchor="w")
         self.lbl_base.pack(side="left")
-        self.base_input = ctk.CTkEntry(row1, width=100); self.base_input.insert(0, "1.2"); self.base_input.pack(side="left", padx=10)
+        self.base_input = ctk.CTkEntry(row1, width=100); self.base_input.insert(0, "20.0"); self.base_input.pack(side="left", padx=10)
         self.lbl_trace = ctk.CTkLabel(row1, text="Cao mach (mm):", width=120, anchor="w")
         self.lbl_trace.pack(side="left", padx=(20, 0))
         self.trace_input = ctk.CTkEntry(row1, width=100); self.trace_input.insert(0, "0.6"); self.trace_input.pack(side="left", padx=10)
@@ -267,8 +299,18 @@ class App(ctk.CTk):
         self.mode_switch.pack(side="left", padx=10)
         self.lbl_smooth = ctk.CTkLabel(row2, text="Lam min:", width=80, anchor="w")
         self.lbl_smooth.pack(side="left", padx=(40, 0))
-        self.smooth_slider = ctk.CTkSlider(row2, from_=0, to=5, number_of_steps=5, width=150)
+        self.smooth_slider = ctk.CTkSlider(row2, from_=0, to=5, number_of_steps=5, width=120)
         self.smooth_slider.set(0); self.smooth_slider.pack(side="left", padx=10)
+
+        self.lbl_sharpen = ctk.CTkLabel(row2, text="Tang net:", width=80, anchor="w")
+        self.lbl_sharpen.pack(side="left", padx=(20, 0))
+        self.sharpen_slider = ctk.CTkSlider(row2, from_=0, to=5, number_of_steps=5, width=120)
+        self.sharpen_slider.set(0); self.sharpen_slider.pack(side="left", padx=10)
+
+        self.lbl_noise = ctk.CTkLabel(row2, text="Xoa chu:", width=80, anchor="w")
+        self.lbl_noise.pack(side="left", padx=(20, 0))
+        self.noise_slider = ctk.CTkSlider(row2, from_=0, to=1000, number_of_steps=20, width=120)
+        self.noise_slider.set(0); self.noise_slider.pack(side="left", padx=10)
 
         # Row 3
         row3 = ctk.CTkFrame(self.cfg_inner, fg_color="transparent")
@@ -276,6 +318,12 @@ class App(ctk.CTk):
         self.skip_holes_var = ctk.BooleanVar(value=False)
         self.skip_holes_cb = ctk.CTkCheckBox(row3, text="Bo duc lo", variable=self.skip_holes_var)
         self.skip_holes_cb.pack(side="left")
+
+        self.lbl_hole_size = ctk.CTkLabel(row3, text="Size lo:", width=80, anchor="w")
+        self.lbl_hole_size.pack(side="left", padx=(40, 0))
+        self.hole_size_slider = ctk.CTkSlider(row3, from_=0.1, to=1.0, width=150)
+        self.hole_size_slider.set(0.6); self.hole_size_slider.pack(side="left", padx=10)
+
         self.edit_holes_btn = ctk.CTkButton(row3, text="✏️ Chinh sua lo", command=self.edit_holes, width=150, height=35, fg_color="gray25")
         self.edit_holes_btn.pack(side="right")
 
@@ -310,6 +358,9 @@ class App(ctk.CTk):
         self.lbl_trace.configure(text=self.t("label_trace_height"))
         self.lbl_mode.configure(text=self.t("label_mode"))
         self.lbl_smooth.configure(text=self.t("label_smooth"))
+        self.lbl_sharpen.configure(text=self.t("label_sharpen"))
+        self.lbl_noise.configure(text=self.t("label_remove_noise"))
+        self.lbl_hole_size.configure(text=self.t("label_hole_size"))
         self.skip_holes_cb.configure(text=self.t("cb_skip_holes"))
         self.edit_holes_btn.configure(text="✏️ " + self.t("btn_edit_holes"))
         self.update_info()
@@ -350,15 +401,19 @@ class App(ctk.CTk):
             if mouse_x>=0 and mouse_y>=0: cv2.circle(disp, (mouse_x,mouse_y), brush_size, (255,255,0), 2)
             cv2.imshow(win_name, disp)
         def mouse_event(event, x, y, flags, param):
-            nonlocal drawing, mouse_x, mouse_y; mouse_x, mouse_y = x, y
-            if event in [cv2.EVENT_LBUTTONDOWN, cv2.EVENT_RBUTTONDOWN]:
+            nonlocal drawing, mouse_x, mouse_y, brush_size; mouse_x, mouse_y = x, y
+            if event == cv2.EVENT_MOUSEWHEEL:
+                if flags > 0: brush_size += 2
+                else: brush_size = max(1, brush_size - 2)
+            elif event in [cv2.EVENT_LBUTTONDOWN, cv2.EVENT_RBUTTONDOWN]:
                 save_state(); drawing = True
                 val = 0 if flags & cv2.EVENT_FLAG_LBUTTON else 1
-                cv2.circle(self.custom_hole_mask.view(np.uint8), (x,y), brush_size, val, -1); update_display()
+                cv2.circle(self.custom_hole_mask.view(np.uint8), (x,y), brush_size, val, -1)
             elif event == cv2.EVENT_MOUSEMOVE and drawing:
                 val = 0 if flags & cv2.EVENT_FLAG_LBUTTON else 1
-                cv2.circle(self.custom_hole_mask.view(np.uint8), (x,y), brush_size, val, -1); update_display()
-            elif event in [cv2.EVENT_LBUTTONUP, cv2.EVENT_RBUTTONUP]: drawing = False; update_display()
+                cv2.circle(self.custom_hole_mask.view(np.uint8), (x,y), brush_size, val, -1)
+            elif event in [cv2.EVENT_LBUTTONUP, cv2.EVENT_RBUTTONUP]: drawing = False
+            update_display()
         cv2.namedWindow(win_name, cv2.WINDOW_NORMAL); cv2.resizeWindow(win_name, 1200, 800); cv2.setMouseCallback(win_name, mouse_event); update_display()
         while True:
             k = cv2.waitKey(50) & 0xFF
@@ -373,8 +428,8 @@ class App(ctk.CTk):
         try:
             self.log(self.t("log_start")); self.set_progress(0)
             base, trace = float(self.base_input.get() or 1.2), float(self.trace_input.get() or 0.6)
-            mode, smooth_val, skip_holes = self.mode_var.get(), self.smooth_slider.get(), self.skip_holes_var.get()
-            out = process(self.png_path, self.svg_path, base, trace, mode=mode, smooth_val=smooth_val, skip_holes=skip_holes,
+            mode, smooth_val, sharpen_val, hole_size_ratio, noise_val, skip_holes = self.mode_var.get(), self.smooth_slider.get(), self.sharpen_slider.get(), self.hole_size_slider.get(), self.noise_slider.get(), self.skip_holes_var.get()
+            out = process(self.png_path, self.svg_path, base, trace, mode=mode, smooth_val=smooth_val, sharpen_val=sharpen_val, hole_size_ratio=hole_size_ratio, noise_val=noise_val, skip_holes=skip_holes,
                 custom_hole_mask=self.custom_hole_mask, output_path=self.output_path, log_cb=self.log, prog_cb=self.set_progress,
                 texts=self.all_langs.get(self.curr_lang))
             self.log(self.t("log_output") + f" {out}")
