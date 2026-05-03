@@ -37,55 +37,101 @@ def parse_svg_size(svg_file):
 # ================= MESH =================
 def create_mesh(heightmap, hole_mask, pitch_x, pitch_y, base_thickness):
     rows, cols = heightmap.shape
-
-    x = np.arange(cols) * pitch_x
-    y = np.arange(rows) * pitch_y
-    xg, yg = np.meshgrid(x, y)
-
-    top = heightmap + base_thickness
-
-    v_top = np.stack([xg.flatten(), yg.flatten(), top.flatten()], axis=1)
-    v_bot = np.stack([xg.flatten(), yg.flatten(), np.zeros_like(top).flatten()], axis=1)
-
-    vertices = np.vstack([v_top, v_bot])
-    num_v = rows * cols
-
+    
+    vertices = []
     faces = []
+    
+    # Ham ho tro de them vertex va tra ve index
+    v_dict = {}
+    def get_v(x, y, z):
+        v = (float(x), float(y), float(z))
+        if v not in v_dict:
+            v_dict[v] = len(vertices)
+            vertices.append(v)
+        return v_dict[v]
 
-    for i in range(rows - 1):
-        for j in range(cols - 1):
-
+    # Duyet tung pixel de tao mat Tren va vach dung
+    for i in range(rows):
+        for j in range(cols):
             if hole_mask[i, j]:
                 continue
-
-            idx = i * cols + j
-            b = idx + num_v
-
-            faces += [
-                [idx, idx+1, idx+cols],
-                [idx+1, idx+cols+1, idx+cols],
-                [b, b+cols, b+1],
-                [b+1, b+cols, b+cols+1],
-            ]
-
-            # Thêm các mặt bên (tường) để biến lưới thành khối đặc (solid mesh)
-            if i == 0 or hole_mask[i-1, j]:
-                faces += [[idx, b, idx+1], [idx+1, b, b+1]]
                 
-            if i == rows - 2 or hole_mask[i+1, j]:
-                faces += [[idx+cols, idx+cols+1, b+cols], [idx+cols+1, b+cols+1, b+cols]]
+            h = heightmap[i, j] + base_thickness
+            z_top = h
+            z_bot = 0
+            
+            x0, x1 = j * pitch_x, (j + 1) * pitch_x
+            y0, y1 = i * pitch_y, (i + 1) * pitch_y
+            
+            # --- MAT TREN (TOP) ---
+            v0 = get_v(x0, y0, z_top)
+            v1 = get_v(x1, y0, z_top)
+            v2 = get_v(x1, y1, z_top)
+            v3 = get_v(x0, y1, z_top)
+            faces.append([v0, v1, v2])
+            faces.append([v0, v2, v3])
+            
+            # --- MAT DUOI (BOTTOM) ---
+            b0 = get_v(x0, y0, z_bot)
+            b1 = get_v(x1, y0, z_bot)
+            b2 = get_v(x1, y1, z_bot)
+            b3 = get_v(x0, y1, z_bot)
+            faces.append([b0, b2, b1])
+            faces.append([b0, b3, b2])
+            
+            # --- VACH DUNG (VERTICAL WALLS) ---
+            # Kiem tra cac lang gieng de tao vach neu co su chenh lech do cao
+            # Ben trai
+            if j == 0 or hole_mask[i, j-1] or heightmap[i, j-1] != heightmap[i, j]:
+                h_neigh = (heightmap[i, j-1] + base_thickness) if (j > 0 and not hole_mask[i, j-1]) else 0
+                if j == 0 or hole_mask[i, j-1]: h_neigh = 0 # Canh board hoac lo khoan thi xuong tan day
                 
-            if j == 0 or hole_mask[i, j-1]:
-                faces += [[idx, idx+cols, b], [idx+cols, b+cols, b]]
+                # Chi tao vach tu h_neigh len z_top
+                low = h_neigh
+                if low < z_top:
+                    v_low0 = get_v(x0, y0, low)
+                    v_low1 = get_v(x0, y1, low)
+                    faces.append([v_low0, v0, v3])
+                    faces.append([v_low0, v3, v_low1])
+
+            # Ben phai
+            if j == cols - 1 or hole_mask[i, j+1] or heightmap[i, j+1] != heightmap[i, j]:
+                h_neigh = (heightmap[i, j+1] + base_thickness) if (j < cols - 1 and not hole_mask[i, j+1]) else 0
+                if j == cols - 1 or hole_mask[i, j+1]: h_neigh = 0
                 
-            if j == cols - 2 or hole_mask[i, j+1]:
-                faces += [[idx+1, b+1, idx+cols+1], [idx+cols+1, b+1, b+cols+1]]
+                if h_neigh < z_top:
+                    v_low0 = get_v(x1, y0, h_neigh)
+                    v_low1 = get_v(x1, y1, h_neigh)
+                    faces.append([v1, v_low0, v_low1])
+                    faces.append([v1, v_low1, v2])
+
+            # Tren
+            if i == 0 or hole_mask[i-1, j] or heightmap[i-1, j] != heightmap[i, j]:
+                h_neigh = (heightmap[i-1, j] + base_thickness) if (i > 0 and not hole_mask[i-1, j]) else 0
+                if i == 0 or hole_mask[i-1, j]: h_neigh = 0
+                
+                if h_neigh < z_top:
+                    v_low0 = get_v(x0, y0, h_neigh)
+                    v_low1 = get_v(x1, y0, h_neigh)
+                    faces.append([v0, v_low1, v1])
+                    faces.append([v0, v_low0, v_low1])
+
+            # Duoi
+            if i == rows - 1 or hole_mask[i+1, j] or heightmap[i+1, j] != heightmap[i, j]:
+                h_neigh = (heightmap[i+1, j] + base_thickness) if (i < rows - 1 and not hole_mask[i+1, j]) else 0
+                if i == rows - 1 or hole_mask[i+1, j]: h_neigh = 0
+                
+                if h_neigh < z_top:
+                    v_low0 = get_v(x0, y1, h_neigh)
+                    v_low1 = get_v(x1, y1, h_neigh)
+                    faces.append([v3, v2, v_low1])
+                    faces.append([v3, v_low1, v_low0])
 
     return trimesh.Trimesh(vertices=vertices, faces=faces)
 
 
 # ================= PROCESS =================
-def process(png_file, svg_file, base_thickness, trace_height, mode="Lom", skip_holes=False,
+def process(png_file, svg_file, base_thickness, trace_height, mode="Lom", smooth_val=0, skip_holes=False,
             custom_hole_mask=None, output_path=None, log_cb=None, prog_cb=None):
 
     def log(msg):
@@ -122,7 +168,18 @@ def process(png_file, svg_file, base_thickness, trace_height, mode="Lom", skip_h
     pitch_y = svg_h / rows
     prog(0.2)
 
+    # Xu ly lam min va khu nhieu
+    if smooth_val > 0:
+        log(f"Lam min duong mach (level {smooth_val})...")
+        ksize = int(smooth_val * 2 + 1)
+        img = cv2.GaussianBlur(img, (ksize, ksize), 0)
+
+    # Bat buoc dua ve nhi phan (Hard Threshold) de vach dung duoc thang
+    log("Ap dung Hard Threshold de lam sac net vach dung...")
+    _, img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+
     log("Phat hien lo khoan...")
+    # ... (giu nguyen phan phat hien lo)
     _, th = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)
     contours, _ = cv2.findContours(th, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -147,10 +204,8 @@ def process(png_file, svg_file, base_thickness, trace_height, mode="Lom", skip_h
     img_float = img.astype(float) / 255.0
     
     if mode == "Noi":
-        # Trace (den=0) -> cao hon, Nen (trang=1) -> thap hon
         heightmap = (1.0 - img_float) * trace_height
     else:
-        # Trace (den=0) -> thap hon (mac dinh)
         heightmap = (img_float - 1.0) * trace_height
         
     prog(0.6)
@@ -177,7 +232,7 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Tao 3D PCB PRO")
-        self.geometry("1100x750")
+        self.geometry("1100x800")
 
         self.png_path = None
         self.svg_path = None
@@ -223,27 +278,38 @@ class App(ctk.CTk):
         row1.pack(fill="x", padx=5, pady=5)
         
         ctk.CTkLabel(row1, text="Do day de (mm):").pack(side="left", padx=5)
-        self.base_input = ctk.CTkEntry(row1, placeholder_text="1.2", width=100)
+        self.base_input = ctk.CTkEntry(row1, placeholder_text="1.2", width=80)
+        self.base_input.insert(0, "1.2")
         self.base_input.pack(side="left", padx=5)
 
-        ctk.CTkLabel(row1, text="Cao mach (mm):").pack(side="left", padx=15)
-        self.trace_input = ctk.CTkEntry(row1, placeholder_text="0.6", width=100)
+        ctk.CTkLabel(row1, text="Cao mach (mm):").pack(side="left", padx=10)
+        self.trace_input = ctk.CTkEntry(row1, placeholder_text="0.6", width=80)
+        self.trace_input.insert(0, "0.6")
         self.trace_input.pack(side="left", padx=5)
 
-        # Hang 2 cua Config: Kieu mach (Noi/Lom)
+        # Hang 2: Kieu mach & Lam min
         row2 = ctk.CTkFrame(self.cfg, fg_color="transparent")
         row2.pack(fill="x", padx=5, pady=5)
         
-        ctk.CTkLabel(row2, text="Kieu duong mach:").pack(side="left", padx=5)
+        ctk.CTkLabel(row2, text="Kieu:").pack(side="left", padx=5)
         self.mode_var = ctk.StringVar(value="Lom")
         self.mode_switch = ctk.CTkSegmentedButton(row2, values=["Lom", "Noi"], variable=self.mode_var)
-        self.mode_switch.pack(side="left", padx=10)
+        self.mode_switch.pack(side="left", padx=5)
+
+        ctk.CTkLabel(row2, text="Lam min:").pack(side="left", padx=15)
+        self.smooth_slider = ctk.CTkSlider(row2, from_=0, to=5, number_of_steps=5)
+        self.smooth_slider.set(0)
+        self.smooth_slider.pack(side="left", padx=5)
+
+        # Hang 3: Tuy chon khac
+        row3 = ctk.CTkFrame(self.cfg, fg_color="transparent")
+        row3.pack(fill="x", padx=5, pady=5)
 
         self.skip_holes_var = ctk.BooleanVar(value=False)
-        self.skip_holes_cb = ctk.CTkCheckBox(row2, text="Bo duc lo", variable=self.skip_holes_var)
-        self.skip_holes_cb.pack(side="left", padx=20)
+        self.skip_holes_cb = ctk.CTkCheckBox(row3, text="Bo duc lo", variable=self.skip_holes_var)
+        self.skip_holes_cb.pack(side="left", padx=10)
 
-        self.edit_holes_btn = ctk.CTkButton(row2, text="Chinh sua lo", command=self.edit_holes, width=120)
+        self.edit_holes_btn = ctk.CTkButton(row3, text="Chinh sua lo", command=self.edit_holes, width=120)
         self.edit_holes_btn.pack(side="left", padx=10)
 
         # LOG
@@ -383,6 +449,7 @@ class App(ctk.CTk):
             base = float(self.base_input.get() or 1.2)
             trace = float(self.trace_input.get() or 0.6)
             mode = self.mode_var.get()
+            smooth_val = self.smooth_slider.get()
             skip_holes = self.skip_holes_var.get()
 
             out = process(
@@ -391,6 +458,7 @@ class App(ctk.CTk):
                 base,
                 trace,
                 mode=mode,
+                smooth_val=smooth_val,
                 skip_holes=skip_holes,
                 custom_hole_mask=self.custom_hole_mask,
                 output_path=self.output_path,
